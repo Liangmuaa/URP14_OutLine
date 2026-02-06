@@ -1,49 +1,49 @@
-﻿using System.Linq;
+﻿using System;
+using System.Linq;
 using UnityEngine;
 
-namespace SVFramework
+[ExecuteInEditMode]
+public class OutLineTargetComponent : MonoBehaviour
 {
-    [ExecuteInEditMode]
-    public class OutLineTargetComponent : MonoBehaviour
+    private static int s_OutlineColorShaderId = Shader.PropertyToID("_EmissionColor");
+    [SerializeField] private Renderer[] m_MeshRenderers;
+
+    [SerializeField] [ColorUsage(true, true)]
+    private Color m_OutlineColor = Color.cyan;
+
+    public Color OutlineColor => m_OutlineColor;
+
+
+    public virtual Renderer[] MeshRenderers
     {
-        [SerializeField] private Renderer[] m_MeshRenderers;
+        get { return m_MeshRenderers; }
 
-        [SerializeField] private Color m_OutlineColor = Color.cyan;
+        set { m_MeshRenderers = value; }
+    }
 
-        public Color OutlineColor => m_OutlineColor;
-
-        public virtual Renderer[] MeshRenderers
+    protected virtual void Awake()
+    {
+        if (m_MeshRenderers == null)
         {
-            get { return m_MeshRenderers; }
-
-            set { m_MeshRenderers = value; }
+            m_MeshRenderers = GetComponentsInChildren<Renderer>();
+            m_MeshRenderers = m_MeshRenderers.Where(t => (!t.GetComponent<TMPro.TMP_Text>() && !t.GetComponent<TMPro.TMP_SubMesh>())).ToArray();
         }
+    }
 
-        protected virtual void Awake()
+    public void AddTarget(Camera outlineCamera, Color color)
+    {
+        if (outlineCamera != null && outlineCamera.TryGetComponent(out OutLineCameraComponent outLineCameraComponent))
         {
-            if (m_MeshRenderers == null)
-            {
-                m_MeshRenderers = GetComponentsInChildren<Renderer>();
-                m_MeshRenderers = m_MeshRenderers.Where(t => (!t.GetComponent<TMPro.TMP_Text>() && !t.GetComponent<TMPro.TMP_SubMesh>())).ToArray();
-            }
+            m_OutlineColor = color;
+            outLineCameraComponent.AddTarget(this);
         }
+    }
 
-
-        public void AddTarget(Camera camera, Color color)
+    public void RemoveTarget(Camera outlineCamera)
+    {
+        if (outlineCamera != null && outlineCamera.TryGetComponent(out OutLineCameraComponent outLineCameraComponent))
         {
-            if (camera != null && camera.TryGetComponent(out OutLineCameraComponent outLineCameraComponent))
-            {
-                m_OutlineColor = color;
-                outLineCameraComponent.AddTarget(this);
-            }
-        }
-
-        public void RemoveTarget(Camera camera)
-        {
-            if (camera != null && camera.TryGetComponent(out OutLineCameraComponent outLineCameraComponent))
-            {
-                outLineCameraComponent.RemoveTarget(this);
-            }
+            outLineCameraComponent.RemoveTarget(this);
         }
     }
 }

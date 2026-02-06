@@ -83,5 +83,6 @@ MonoBehaviour:
   PreoutlineShader: {fileID: -6465566751694194690, guid: d4b24047bc4166f4cb05401ab1446ded,
     type: 3}
   OutlineShader: {fileID: 4800000, guid: 0d8695200bae65048b093969d2afff0b, type: 3}
-  DrawMode: 1
+  Mode: 0
   RenderPassEvent: 550
+  RenderingMask: 2

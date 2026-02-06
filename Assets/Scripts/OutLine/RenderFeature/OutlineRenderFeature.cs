@@ -7,155 +7,150 @@
 // <author>	<time>					<desc>
 // ***********************************************************/
 
+using System;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 
-namespace SVFramework.URP
+public class OutlineRenderFeature : ScriptableRendererFeature
 {
-    public class OutlineRenderFeature : ScriptableRendererFeature
+    public enum OutlineMode
     {
-        [Header("Outline/OutlinePrePass.shader")]
-        public Shader PreoutlineShader;
+        Convolution,
+        Gaussian,
+    }
 
-        [Header("Outline/OutLineEffect.shader")]
-        public Shader OutlineShader;
+    public enum DrawMode
+    {
+        Renderer,
+        Mesh,
+        MeshInstance //不要使用这个模式, 没实现完整
+    }
 
-        public OutlineRenderPass_PreDrawOutlineObjects.DrawMode DrawMode = OutlineRenderPass_PreDrawOutlineObjects.DrawMode.Mesh;
-        public RenderPassEvent RenderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing;
+    [Header("Outline/OutlinePrePass.shader")]
+    public Shader PreoutlineShader;
 
-        private OutlineRenderPass_CopyColor m_OutlineRenderCopyColorPass;
-        private OutlineRenderPass_PreDrawOutlineObjects m_OutlineRenderPreDrawOutlineObjectsPass;
-        private OutlineRenderPass_BlurOutlineObjects m_OutlineRenderBlurOutlineObjectsPass;
-        private OutlineRenderPass_FinalCombine m_OutlineRenderFinalCombinePass;
-        private Material m_OutlineEffectMaterial;
-        private Material m_PreOutlineMaterial;
+    [Header("Outline/OutLineEffect.shader")]
+    public Shader OutlineShader;
 
-        private RTHandle m_CopyColorRTHandle;
-        private const string k_CopyColorTexName = "_OutlineOriginColorTexture";
-        private RTHandle m_PreDrawObjectsRTHandle;
-        private const string k_PreDrawObjectsTexName = "_PreDrawObjectsTexture";
-        private RTHandle m_BlurOutlineRTHandle;
-        private const string k_BlurOutlineTexName = "_BlurOutlineTexture";
+    public OutlineMode Mode;
 
-        public override void Create()
+    public RenderPassEvent RenderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing;
+    [RenderingLayerMask] public uint RenderingMask = 1 << 1;
+
+    private OutlineRenderPass_Convolution m_OutlineRenderConvolutionPass;
+    private OutlineRenderPass_Gaussian m_OutlineRenderGaussianPass;
+    private Material m_OutlineEffectMaterial;
+    private Material m_PreOutlineMaterial;
+
+    public override void Create()
+    {
+        if (OutlineShader == null)
         {
-            if (OutlineShader == null)
-            {
-                return;
-            }
-
-            if (PreoutlineShader == null)
-            {
-                return;
-            }
-
-            m_PreOutlineMaterial = CoreUtils.CreateEngineMaterial(PreoutlineShader);
-            m_OutlineEffectMaterial = CoreUtils.CreateEngineMaterial(OutlineShader);
-            m_PreOutlineMaterial.enableInstancing = true;
-
-            m_OutlineRenderCopyColorPass = new OutlineRenderPass_CopyColor(RenderPassEvent);
-            m_OutlineRenderPreDrawOutlineObjectsPass = new OutlineRenderPass_PreDrawOutlineObjects(RenderPassEvent, DrawMode, m_PreOutlineMaterial);
-            m_OutlineRenderBlurOutlineObjectsPass = new OutlineRenderPass_BlurOutlineObjects(RenderPassEvent, m_OutlineEffectMaterial);
-            m_OutlineRenderFinalCombinePass = new OutlineRenderPass_FinalCombine(RenderPassEvent, m_OutlineEffectMaterial);
+            return;
         }
 
-        public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
+        m_OutlineEffectMaterial = CoreUtils.CreateEngineMaterial(OutlineShader);
+
+        switch (Mode)
         {
-            if (renderingData.cameraData.cameraType != CameraType.Game)
-            {
-                return;
-            }
+            case OutlineMode.Convolution:
+                m_OutlineRenderConvolutionPass = new OutlineRenderPass_Convolution(RenderPassEvent, m_OutlineEffectMaterial, RenderingMask);
+                break;
+            case OutlineMode.Gaussian:
+                if (PreoutlineShader == null)
+                {
+                    return;
+                }
 
-            var cameraOutlineContainer = renderingData.cameraData.camera.GetComponent<OutLineCameraComponent>();
+                m_PreOutlineMaterial = CoreUtils.CreateEngineMaterial(PreoutlineShader);
+                m_OutlineRenderGaussianPass = new OutlineRenderPass_Gaussian(RenderPassEvent, m_PreOutlineMaterial, m_OutlineEffectMaterial, DrawMode.Mesh, RenderingMask);
+                break;
+        }
+    }
 
-            if (cameraOutlineContainer == null || !cameraOutlineContainer.enabled)
-            {
-                return;
-            }
-
-            if (cameraOutlineContainer.TargetObjects == null || cameraOutlineContainer.TargetObjects.Count == 0)
-            {
-                return;
-            }
-
-            renderer.EnqueuePass(m_OutlineRenderCopyColorPass);
-            renderer.EnqueuePass(m_OutlineRenderPreDrawOutlineObjectsPass);
-            renderer.EnqueuePass(m_OutlineRenderBlurOutlineObjectsPass);
-            renderer.EnqueuePass(m_OutlineRenderFinalCombinePass);
+    public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
+    {
+        if (renderingData.cameraData.cameraType != CameraType.Game)
+        {
+            return;
         }
 
-        public override void SetupRenderPasses(ScriptableRenderer renderer, in RenderingData renderingData)
+        var cameraOutlineContainer = renderingData.cameraData.camera.GetComponent<OutLineCameraComponent>();
+
+        if (cameraOutlineContainer == null || !cameraOutlineContainer.enabled)
         {
-            if (renderingData.cameraData.cameraType != CameraType.Game)
-            {
-                return;
-            }
-
-            if (renderer.cameraColorTargetHandle == null)
-            {
-                return;
-            }
-
-            var cameraOutlineContainer = renderingData.cameraData.camera.GetComponent<OutLineCameraComponent>();
-
-            if (cameraOutlineContainer == null || !cameraOutlineContainer.enabled)
-            {
-                return;
-            }
-            
-
-            if (cameraOutlineContainer.TargetObjects == null || cameraOutlineContainer.TargetObjects.Count == 0)
-            {
-                return;
-            }
-
-            var downSampleDesc = renderingData.cameraData.cameraTargetDescriptor;
-            downSampleDesc.width >>= cameraOutlineContainer.DownSample;
-            downSampleDesc.height >>= cameraOutlineContainer.DownSample;
-            downSampleDesc.depthBufferBits = 0;
-            downSampleDesc.msaaSamples = 1;
-            downSampleDesc.graphicsFormat = GraphicsFormat.R8G8B8A8_SRGB;
-
-            var desc = renderingData.cameraData.cameraTargetDescriptor; //CopyColor使用原图画质
-            desc.depthBufferBits = 0;
-            desc.msaaSamples = 1;
-
-
-            RenderingUtils.ReAllocateIfNeeded(ref m_CopyColorRTHandle, desc, FilterMode.Bilinear, TextureWrapMode.Clamp, name: k_CopyColorTexName);
-            RenderingUtils.ReAllocateIfNeeded(ref m_PreDrawObjectsRTHandle, downSampleDesc, FilterMode.Bilinear, TextureWrapMode.Clamp, name: k_PreDrawObjectsTexName);
-            RenderingUtils.ReAllocateIfNeeded(ref m_BlurOutlineRTHandle, downSampleDesc, FilterMode.Bilinear, TextureWrapMode.Clamp, name: k_BlurOutlineTexName);
-
-
-            m_OutlineRenderCopyColorPass.Setup(renderer.cameraColorTargetHandle, ref m_CopyColorRTHandle);
-            m_OutlineRenderPreDrawOutlineObjectsPass.Setup(cameraOutlineContainer, ref m_PreDrawObjectsRTHandle);
-            m_OutlineRenderBlurOutlineObjectsPass.Setup(ref m_PreDrawObjectsRTHandle, ref m_BlurOutlineRTHandle, cameraOutlineContainer.SamplerArea, cameraOutlineContainer.Iteration, cameraOutlineContainer.DownSample);
-            m_OutlineRenderFinalCombinePass.Setup(ref m_CopyColorRTHandle, ref m_BlurOutlineRTHandle, renderer.cameraColorTargetHandle, cameraOutlineContainer.OutLineStrength);
+            return;
         }
 
-        protected override void Dispose(bool disposing)
+        if (cameraOutlineContainer.TargetObjects == null || cameraOutlineContainer.TargetObjects.Count == 0)
         {
-            base.Dispose(disposing);
-
-            CoreUtils.Destroy(m_OutlineEffectMaterial);
-            m_OutlineEffectMaterial = null;
-            CoreUtils.Destroy(m_PreOutlineMaterial);
-            m_PreOutlineMaterial = null;
-
-            m_OutlineRenderPreDrawOutlineObjectsPass?.Dispose();
-            m_OutlineRenderBlurOutlineObjectsPass?.Dispose();
-            m_OutlineRenderFinalCombinePass?.Dispose();
-
-
-            m_OutlineRenderCopyColorPass = null;
-            m_OutlineRenderPreDrawOutlineObjectsPass = null;
-            m_OutlineRenderBlurOutlineObjectsPass = null;
-            m_OutlineRenderFinalCombinePass = null;
-
-            m_CopyColorRTHandle?.Release();
-            m_PreDrawObjectsRTHandle?.Release();
-            m_BlurOutlineRTHandle?.Release();
+            return;
         }
+
+        switch (Mode)
+        {
+            case OutlineMode.Convolution:
+                renderer.EnqueuePass(m_OutlineRenderConvolutionPass);
+                break;
+            case OutlineMode.Gaussian:
+                renderer.EnqueuePass(m_OutlineRenderGaussianPass);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException();
+        }
+    }
+
+    public override void SetupRenderPasses(ScriptableRenderer renderer, in RenderingData renderingData)
+    {
+        if (renderingData.cameraData.cameraType != CameraType.Game)
+        {
+            return;
+        }
+
+        if (renderer.cameraColorTargetHandle == null)
+        {
+            return;
+        }
+
+        var cameraOutlineContainer = renderingData.cameraData.camera.GetComponent<OutLineCameraComponent>();
+
+        if (cameraOutlineContainer == null || !cameraOutlineContainer.enabled)
+        {
+            return;
+        }
+
+
+        if (cameraOutlineContainer.TargetObjects == null || cameraOutlineContainer.TargetObjects.Count == 0)
+        {
+            return;
+        }
+
+        switch (Mode)
+        {
+            case OutlineMode.Convolution:
+                m_OutlineRenderConvolutionPass.Setup(cameraOutlineContainer.SamplerArea, cameraOutlineContainer.OutlineColor, cameraOutlineContainer.DownSample);
+
+                break;
+            case OutlineMode.Gaussian:
+                m_OutlineRenderGaussianPass.Setup(cameraOutlineContainer);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException();
+        }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        base.Dispose(disposing);
+
+        CoreUtils.Destroy(m_OutlineEffectMaterial);
+        m_OutlineEffectMaterial = null;
+        CoreUtils.Destroy(m_PreOutlineMaterial);
+        m_PreOutlineMaterial = null;
+
+        m_OutlineRenderConvolutionPass?.Dispose();
+        m_OutlineRenderGaussianPass?.Dispose();
     }
 }
